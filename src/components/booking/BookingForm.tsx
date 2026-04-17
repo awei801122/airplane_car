@@ -1,7 +1,6 @@
 import React, { useState } from 'react'
+import { API_BASE } from '../../config/api'
 import { Booking, BookingType, BookingCategory, PaymentStatus, BookingStatus } from '../../types'
-
-const API_BASE = 'http://localhost:3000/api'
 
 const AIRPORTS = [
   { code: 'TPE', name: '桃園國際機場', address: '桃園市大園區航站南路' },
@@ -11,7 +10,6 @@ const AIRPORTS = [
 interface BookingFormProps {
   lineUserId: string
   onSuccess: (booking: Booking) => void
-  onCancel?: () => void
 }
 
 interface FormData {
@@ -32,11 +30,12 @@ interface FareResult {
   estimatedFare: number
 }
 
-const BookingForm: React.FC<BookingFormProps> = ({ lineUserId, onSuccess, onCancel: _onCancel }) => {
+const BookingForm: React.FC<BookingFormProps> = ({ lineUserId, onSuccess }) => {
   const [step, setStep] = useState(1)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [fareResult, setFareResult] = useState<FareResult | null>(null)
+  const [bookingId, setBookingId] = useState<string | null>(null)
   const [formData, setFormData] = useState<FormData>({
     airport: null,
     direction: 'to',
@@ -132,9 +131,10 @@ const BookingForm: React.FC<BookingFormProps> = ({ lineUserId, onSuccess, onCanc
       })
       const data = await res.json()
       if (data.success) {
+        setBookingId(data.booking_id)
         const newBooking: Booking = {
           id: data.booking_id,
-          customer_id: '',
+          customer_id: lineUserId,
           pickup_address: formData.pickupAddress,
           dropoff_address: formData.dropoffAddress,
           pickup_time: formData.pickupTime,
@@ -551,7 +551,7 @@ const BookingForm: React.FC<BookingFormProps> = ({ lineUserId, onSuccess, onCanc
       <div className="bg-surface rounded-xl p-4 border border-border space-y-3">
         <div className="flex justify-between">
           <span className="text-textSecondary">訂單編號</span>
-          <span className="font-bold text-textPrimary">#{'XXXX'.slice(-4)}</span>
+          <span className="font-bold text-textPrimary">#{bookingId?.slice(-4) || '----'}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-textSecondary">上車地點</span>

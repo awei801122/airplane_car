@@ -1,10 +1,9 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useApp } from '../../context/AppContext'
 import { Booking, BookingStatus } from '../../types'
 import BookingForm from '../../components/booking/BookingForm'
-
-const API_BASE = 'http://localhost:3000/api'
+import { API_BASE } from '../../config/api'
 
 const CustomerHome: React.FC = () => {
   const navigate = useNavigate()
@@ -13,13 +12,7 @@ const CustomerHome: React.FC = () => {
   const [recentBookings, setRecentBookings] = useState<Booking[]>([])
   const [loading, setLoading] = useState(false)
 
-  useEffect(() => {
-    if (currentUser?.line_user_id) {
-      fetchBookings()
-    }
-  }, [currentUser])
-
-  const fetchBookings = async () => {
+  const fetchBookings = useCallback(async () => {
     if (!currentUser?.line_user_id) return
     setLoading(true)
     try {
@@ -34,7 +27,13 @@ const CustomerHome: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }
+  }, [currentUser?.line_user_id, setBookings])
+
+  useEffect(() => {
+    if (currentUser?.line_user_id) {
+      fetchBookings()
+    }
+  }, [currentUser?.line_user_id, fetchBookings])
 
   const getStatusColor = (status: BookingStatus) => {
     switch (status) {
@@ -93,7 +92,6 @@ const CustomerHome: React.FC = () => {
             setRecentBookings(prev => [booking, ...prev])
             setShowBookingForm(false)
           }}
-          onCancel={() => setShowBookingForm(false)}
         />
       </div>
     )
