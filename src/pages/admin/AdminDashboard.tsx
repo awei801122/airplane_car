@@ -22,32 +22,44 @@ const AdminDashboard: React.FC = () => {
   const fetchBookings = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/admin/bookings`)
+      if (!res.ok) {
+        console.error('Failed to fetch bookings:', res.status)
+        return
+      }
       const data = await res.json()
       if (data.success) setBookings(data.data)
-    } catch {
-      // ignore
+    } catch (err) {
+      console.error('Failed to fetch bookings:', err)
     }
   }, [])
 
   const fetchDrivers = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/admin/drivers`)
+      if (!res.ok) {
+        console.error('Failed to fetch drivers:', res.status)
+        return
+      }
       const data = await res.json()
       if (data.success) setDrivers(data.data)
-    } catch {
-      // ignore
+    } catch (err) {
+      console.error('Failed to fetch drivers:', err)
     }
   }, [])
 
   const fetchDashboard = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/admin/dashboard`)
+      if (!res.ok) {
+        console.error('Failed to fetch dashboard:', res.status)
+        return
+      }
       const data = await res.json()
       if (data.success) {
         setAlerts(data.data.alerts || [])
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      console.error('Failed to fetch dashboard:', err)
     }
   }, [])
 
@@ -87,6 +99,11 @@ const AdminDashboard: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ driver_id: selectedDriverId })
       })
+      if (!res.ok) {
+        console.error('Failed to assign driver:', res.status)
+        setError('網路錯誤')
+        return
+      }
       const data = await res.json()
       if (data.success) {
         setAssignModalOpen(false)
@@ -96,7 +113,8 @@ const AdminDashboard: React.FC = () => {
       } else {
         setError(data.error || '指派失敗')
       }
-    } catch {
+    } catch (err) {
+      console.error('Failed to assign driver:', err)
       setError('網路錯誤')
     } finally {
       setAssigning(false)
