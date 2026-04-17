@@ -30,18 +30,23 @@ const DriverHome: React.FC = () => {
   const [stats, setStats] = useState({ totalRides: 0, rating: 0 })
   const [loading, setLoading] = useState(false)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   const fetchTasks = useCallback(async () => {
     if (!lineUserId) return
     setLoading(true)
     try {
       const res = await fetch(`${API_BASE}/driver/${lineUserId}/tasks`)
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`)
+      }
       const data = await res.json()
       if (data.success) {
         setTasks(data.data || [])
       }
     } catch (error) {
       console.error('Failed to fetch tasks:', error)
+      setError('操作失敗，請稍後再試')
     } finally {
       setLoading(false)
     }
@@ -51,6 +56,9 @@ const DriverHome: React.FC = () => {
     if (!lineUserId) return
     try {
       const res = await fetch(`${API_BASE}/driver/${lineUserId}/stats`)
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`)
+      }
       const data = await res.json()
       if (data.success) {
         setStats({
@@ -62,6 +70,7 @@ const DriverHome: React.FC = () => {
       }
     } catch (error) {
       console.error('Failed to fetch stats:', error)
+      setError('操作失敗，請稍後再試')
     }
   }, [lineUserId])
 
@@ -80,12 +89,16 @@ const DriverHome: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ lineUserId })
       })
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`)
+      }
       const data = await res.json()
       if (data.success) {
         setIsOnline(!isOnline)
       }
     } catch (error) {
       console.error('Failed to toggle status:', error)
+      setError('操作失敗，請稍後再試')
     } finally {
       setActionLoading(null)
     }
@@ -99,6 +112,9 @@ const DriverHome: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ lineUserId })
       })
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`)
+      }
       const data = await res.json()
       if (data.success) {
         setTelegramBindingUrl(data.data.url || '')
@@ -106,6 +122,7 @@ const DriverHome: React.FC = () => {
       }
     } catch (error) {
       console.error('Failed to bind Telegram:', error)
+      setError('操作失敗，請稍後再試')
     } finally {
       setActionLoading(null)
     }
@@ -119,12 +136,16 @@ const DriverHome: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ lineUserId })
       })
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`)
+      }
       const data = await res.json()
       if (data.success) {
         fetchTasks()
       }
     } catch (error) {
       console.error('Failed to accept task:', error)
+      setError('操作失敗，請稍後再試')
     } finally {
       setActionLoading(null)
     }
@@ -138,12 +159,16 @@ const DriverHome: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ lineUserId })
       })
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`)
+      }
       const data = await res.json()
       if (data.success) {
         fetchTasks()
       }
     } catch (error) {
       console.error('Failed to reject task:', error)
+      setError('操作失敗，請稍後再試')
     } finally {
       setActionLoading(null)
     }
@@ -157,12 +182,16 @@ const DriverHome: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ lineUserId })
       })
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`)
+      }
       const data = await res.json()
       if (data.success) {
         fetchTasks()
       }
     } catch (error) {
       console.error('Failed to confirm start:', error)
+      setError('操作失敗，請稍後再試')
     } finally {
       setActionLoading(null)
     }
@@ -176,6 +205,9 @@ const DriverHome: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ lineUserId })
       })
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`)
+      }
       const data = await res.json()
       if (data.success) {
         fetchTasks()
@@ -183,6 +215,7 @@ const DriverHome: React.FC = () => {
       }
     } catch (error) {
       console.error('Failed to complete trip:', error)
+      setError('操作失敗，請稍後再試')
     } finally {
       setActionLoading(null)
     }
@@ -248,6 +281,15 @@ const DriverHome: React.FC = () => {
           <p className="text-white/80 text-sm">ID: {lineUserId.slice(-6) || '載入中...'}</p>
         </div>
       </div>
+
+      {error && (
+        <div className="max-w-lg mx-auto px-4 mt-4 bg-error/10 border border-error/30 rounded-xl p-3">
+          <div className="flex items-center gap-2 text-error text-sm">
+            <i className="fa-solid fa-exclamation-circle"></i>
+            {error}
+          </div>
+        </div>
+      )}
 
       {/* Online/Offline Toggle */}
       <div className="max-w-lg mx-auto px-4 -mt-3">
