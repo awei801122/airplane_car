@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3'
 import path from 'path'
+import fs from 'fs'
 
 const DB_PATH = process.env.DATABASE_PATH || './data/yjova.db'
 
@@ -8,7 +9,6 @@ let db = null
 export function getDb() {
   if (!db) {
     const dbDir = path.dirname(DB_PATH)
-    const fs = require('fs')
     if (!fs.existsSync(dbDir)) {
       fs.mkdirSync(dbDir, { recursive: true })
     }
