@@ -20,6 +20,127 @@ const CANCEL_REASONS = [
   '其他'
 ]
 
+const getStatusColor = (status: BookingStatus) => {
+  switch (status) {
+    case BookingStatus.PENDING: return 'bg-yellow-100 text-yellow-800'
+    case BookingStatus.ASSIGNED: return 'bg-blue-100 text-blue-800'
+    case BookingStatus.CONFIRMED: return 'bg-green-100 text-green-800'
+    case BookingStatus.STARTING: return 'bg-orange-100 text-orange-800'
+    case BookingStatus.COMPLETED: return 'bg-gray-100 text-gray-800'
+    case BookingStatus.CANCELLED: return 'bg-red-100 text-red-800'
+    default: return 'bg-gray-100 text-gray-800'
+  }
+}
+
+const getStatusText = (status: BookingStatus) => {
+  switch (status) {
+    case BookingStatus.PENDING: return '等待派車'
+    case BookingStatus.ASSIGNED: return '已派車'
+    case BookingStatus.CONFIRMED: return '已確認'
+    case BookingStatus.STARTING: return '行程進行中'
+    case BookingStatus.COMPLETED: return '已完成'
+    case BookingStatus.CANCELLED: return '已取消'
+    default: return status
+  }
+}
+
+const formatDateTime = (dateStr: string) => {
+  const date = new Date(dateStr)
+  return date.toLocaleString('zh-TW', {
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+const canCancel = (status: BookingStatus) => {
+  return status === BookingStatus.PENDING || status === BookingStatus.ASSIGNED || status === BookingStatus.CONFIRMED
+}
+
+const renderBookingCard = (booking: Booking, handleCancelClick: (bookingId: string) => void) => (
+  <div key={booking.id} className="bg-surface rounded-xl p-4 shadow-sm border border-border">
+    {/* Header */}
+    <div className="flex items-start justify-between mb-3">
+      <div>
+        <span className="text-xs text-textSecondary">訂單</span>
+        <p className="font-bold text-textPrimary">#{booking.id.slice(-4)}</p>
+      </div>
+      <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(booking.status)}`}>
+        {getStatusText(booking.status)}
+      </span>
+    </div>
+
+    {/* Route */}
+    <div className="space-y-2 mb-3">
+      <div className="flex items-start gap-2">
+        <i className="fa-solid fa-circle-notch text-primary mt-1.5 text-xs"></i>
+        <span className="text-textPrimary">{booking.pickup_address}</span>
+      </div>
+      <div className="flex items-start gap-2">
+        <i className="fa-solid fa-location-dot text-error mt-1.5 text-xs"></i>
+        <span className="text-textPrimary">{booking.dropoff_address}</span>
+      </div>
+    </div>
+
+    {/* Time & Fare */}
+    <div className="flex items-center justify-between py-3 border-t border-b border-border">
+      <span className="text-sm text-textSecondary">
+        <i className="fa-solid fa-clock mr-1"></i>
+        {formatDateTime(booking.pickup_time)}
+      </span>
+      <span className="font-bold text-primary text-lg">
+        NT$ {booking.estimated_fare}
+      </span>
+    </div>
+
+    {/* Driver Card (if driver assigned) */}
+    {(booking.status === BookingStatus.ASSIGNED || booking.status === BookingStatus.CONFIRMED || booking.status === BookingStatus.STARTING) &&
+     booking.driver_id && (
+      <div className="mt-3">
+        {booking.license_plate && booking.vehicle_model && (
+          <DriverCard
+            driver={{
+              id: booking.driver_id,
+              user_id: '',
+              license_plate: booking.license_plate,
+              vehicle_model: booking.vehicle_model,
+              rating: 4.8,
+              total_rides: 0,
+              status: booking.status === BookingStatus.STARTING ? DriverStatus.BUSY : DriverStatus.AVAILABLE,
+              is_confirmed: true
+            }}
+            driverName={booking.driver_name}
+            driverPhone={booking.driver_phone}
+          />
+        )}
+      </div>
+    )}
+
+    {/* Cancel reason (if cancelled) */}
+    {booking.status === BookingStatus.CANCELLED && booking.cancel_reason && (
+      <div className="mt-3 bg-red-50 rounded-lg p-3 border border-red-200">
+        <span className="text-xs text-error font-medium">
+          <i className="fa-solid fa-ban mr-1"></i>
+          取消原因：
+        </span>
+        <span className="text-sm text-error">{booking.cancel_reason}</span>
+      </div>
+    )}
+
+    {/* Cancel button */}
+    {canCancel(booking.status) && (
+      <button
+        onClick={() => handleCancelClick(booking.id)}
+        className="w-full mt-3 bg-error/10 hover:bg-error/20 text-error font-medium py-2 rounded-xl transition-colors"
+      >
+        <i className="fa-solid fa-ban mr-2"></i>
+        取消預約
+      </button>
+    )}
+  </div>
+)
+
 const BookingHistory: React.FC = () => {
   const { currentUser, updateBooking } = useApp()
   const [bookings, setBookings] = useState<Booking[]>([])
@@ -27,12 +148,16 @@ const BookingHistory: React.FC = () => {
   const [filter, setFilter] = useState<FilterStatus>('all')
   const [cancelModal, setCancelModal] = useState<CancelModalState>({ show: false, bookingId: null, reason: '' })
   const [cancelLoading, setCancelLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const fetchBookings = useCallback(async () => {
     if (!currentUser?.line_user_id) return
     setLoading(true)
     try {
       const res = await fetch(`${API_BASE}/bookings/customer/${currentUser.line_user_id}`)
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`)
+      }
       const data = await res.json()
       if (data.success) {
         setBookings(data.data)
@@ -55,10 +180,6 @@ const BookingHistory: React.FC = () => {
     return booking.status === filter
   })
 
-  const canCancel = (status: BookingStatus) => {
-    return status === BookingStatus.PENDING || status === BookingStatus.ASSIGNED || status === BookingStatus.CONFIRMED
-  }
-
   const handleCancelClick = (bookingId: string) => {
     setCancelModal({ show: true, bookingId, reason: '' })
   }
@@ -73,6 +194,9 @@ const BookingHistory: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason: cancelModal.reason })
       })
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`)
+      }
       const data = await res.json()
       if (data.success) {
         updateBooking(cancelModal.bookingId, {
@@ -87,132 +211,15 @@ const BookingHistory: React.FC = () => {
         ))
         setCancelModal({ show: false, bookingId: null, reason: '' })
       } else {
-        alert(data.error || '取消失敗，請稍後再試')
+        setError(data.error || '取消失敗，請稍後再試')
       }
     } catch (error) {
       console.error('Failed to cancel booking:', error)
-      alert('網路錯誤，請檢查連線')
+      setError('網路錯誤，請檢查連線')
     } finally {
       setCancelLoading(false)
     }
   }
-
-  const getStatusColor = (status: BookingStatus) => {
-    switch (status) {
-      case BookingStatus.PENDING: return 'bg-yellow-100 text-yellow-800'
-      case BookingStatus.ASSIGNED: return 'bg-blue-100 text-blue-800'
-      case BookingStatus.CONFIRMED: return 'bg-green-100 text-green-800'
-      case BookingStatus.STARTING: return 'bg-orange-100 text-orange-800'
-      case BookingStatus.COMPLETED: return 'bg-gray-100 text-gray-800'
-      case BookingStatus.CANCELLED: return 'bg-red-100 text-red-800'
-      default: return 'bg-gray-100 text-gray-800'
-    }
-  }
-
-  const getStatusText = (status: BookingStatus) => {
-    switch (status) {
-      case BookingStatus.PENDING: return '等待派車'
-      case BookingStatus.ASSIGNED: return '已派車'
-      case BookingStatus.CONFIRMED: return '已確認'
-      case BookingStatus.STARTING: return '行程進行中'
-      case BookingStatus.COMPLETED: return '已完成'
-      case BookingStatus.CANCELLED: return '已取消'
-      default: return status
-    }
-  }
-
-  const formatDateTime = (dateStr: string) => {
-    const date = new Date(dateStr)
-    return date.toLocaleString('zh-TW', {
-      month: 'numeric',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    })
-  }
-
-  const renderBookingCard = (booking: Booking) => (
-    <div key={booking.id} className="bg-surface rounded-xl p-4 shadow-sm border border-border">
-      {/* Header */}
-      <div className="flex items-start justify-between mb-3">
-        <div>
-          <span className="text-xs text-textSecondary">訂單</span>
-          <p className="font-bold text-textPrimary">#{booking.id.slice(-4)}</p>
-        </div>
-        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(booking.status)}`}>
-          {getStatusText(booking.status)}
-        </span>
-      </div>
-
-      {/* Route */}
-      <div className="space-y-2 mb-3">
-        <div className="flex items-start gap-2">
-          <i className="fa-solid fa-circle-notch text-primary mt-1.5 text-xs"></i>
-          <span className="text-textPrimary">{booking.pickup_address}</span>
-        </div>
-        <div className="flex items-start gap-2">
-          <i className="fa-solid fa-location-dot text-error mt-1.5 text-xs"></i>
-          <span className="text-textPrimary">{booking.dropoff_address}</span>
-        </div>
-      </div>
-
-      {/* Time & Fare */}
-      <div className="flex items-center justify-between py-3 border-t border-b border-border">
-        <span className="text-sm text-textSecondary">
-          <i className="fa-solid fa-clock mr-1"></i>
-          {formatDateTime(booking.pickup_time)}
-        </span>
-        <span className="font-bold text-primary text-lg">
-          NT$ {booking.estimated_fare}
-        </span>
-      </div>
-
-      {/* Driver Card (if driver assigned) */}
-      {(booking.status === BookingStatus.ASSIGNED || booking.status === BookingStatus.CONFIRMED || booking.status === BookingStatus.STARTING) &&
-       booking.driver_id && (
-        <div className="mt-3">
-          {booking.license_plate && booking.vehicle_model && (
-            <DriverCard
-              driver={{
-                id: booking.driver_id,
-                user_id: '',
-                license_plate: booking.license_plate,
-                vehicle_model: booking.vehicle_model,
-                rating: 4.8,
-                total_rides: 0,
-                status: booking.status === BookingStatus.STARTING ? DriverStatus.BUSY : DriverStatus.AVAILABLE,
-                is_confirmed: true
-              }}
-              driverName={booking.driver_name}
-              driverPhone={booking.driver_phone}
-            />
-          )}
-        </div>
-      )}
-
-      {/* Cancel reason (if cancelled) */}
-      {booking.status === BookingStatus.CANCELLED && booking.cancel_reason && (
-        <div className="mt-3 bg-red-50 rounded-lg p-3 border border-red-200">
-          <span className="text-xs text-error font-medium">
-            <i className="fa-solid fa-ban mr-1"></i>
-            取消原因：
-          </span>
-          <span className="text-sm text-error">{booking.cancel_reason}</span>
-        </div>
-      )}
-
-      {/* Cancel button */}
-      {canCancel(booking.status) && (
-        <button
-          onClick={() => handleCancelClick(booking.id)}
-          className="w-full mt-3 bg-error/10 hover:bg-error/20 text-error font-medium py-2 rounded-xl transition-colors"
-        >
-          <i className="fa-solid fa-ban mr-2"></i>
-          取消預約
-        </button>
-      )}
-    </div>
-  )
 
   return (
     <div className="min-h-screen bg-background pb-20">
@@ -228,6 +235,19 @@ const BookingHistory: React.FC = () => {
           </p>
         </div>
       </div>
+
+      {/* Error display */}
+      {error && (
+        <div className="mx-4 mt-4 bg-error/10 border border-error/30 rounded-xl p-3">
+          <div className="flex items-center gap-2 text-error text-sm">
+            <i className="fa-solid fa-exclamation-circle"></i>
+            {error}
+            <button onClick={() => setError(null)} className="ml-auto">
+              <i className="fa-solid fa-times"></i>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Filter tabs */}
       <div className="bg-surface border-b border-border sticky top-0 z-10">
@@ -269,7 +289,7 @@ const BookingHistory: React.FC = () => {
           </div>
         ) : (
           <div className="space-y-4">
-            {filteredBookings.map(renderBookingCard)}
+            {filteredBookings.map(booking => renderBookingCard(booking, handleCancelClick))}
           </div>
         )}
       </div>
