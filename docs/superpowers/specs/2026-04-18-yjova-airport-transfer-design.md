@@ -1,6 +1,6 @@
 # YJOVA 車來了 - 機場接送預約系統規格文件
 
-**版本**：1.0
+**版本**：1.1
 **更新日期**：2026-04-18
 **客戶**：硬派租賃有限公司
 
@@ -22,9 +22,10 @@
 
 ### 1.3 設計理念
 
-- **LINE 作為唯一前台**：所有操作在 LINE 內完成，減少多App切換
-- **免費優先**：客戶端使用 Reply API（30天有效期 token），管理員使用 Telegram Bot
-- **省費用的自動化**：每小時自動計算報表，管理員主動查詢而非被動推播
+- **LINE 作為客戶前台**：所有客戶操作在 LINE 內完成
+- **Telegram 作為司機/管理員後台**：司機和管理員透過 Telegram 接收即時通知與操作
+- **免費優先**：客戶端使用 Reply API（30天有效期 token），司機和管理員使用 Telegram Bot
+- **省費用的自動化**：系統主動通知，減少人工作業遺漏
 
 ---
 
@@ -39,17 +40,17 @@
 | **後端** | Node.js + Express |
 | **資料庫** | SQLite（小型、部署簡單） |
 | **部署** | Docker + Nginx（VPS） |
-| **外部整合** | LINE Messaging API / LIFF, Telegram Bot, Google Gemini |
+| **外部整合** | LINE Messaging API / LIFF, Telegram Bot, OpenRouteService |
 
 ### 2.2 三端 LIFF 設計
 
 | 端 | LIFF 路徑 | 功能 |
 |----|-----------|------|
-| **客戶端** | `/customer` | 叫車、付款、查看司機資訊、行程歷史 |
-| **司機端** | `/driver` | 接收訂單、承接/拒絕、確認出發、完成行程 |
-| **管理端** | `/admin` | 調度指派、訂單總表、司機狀態、警示牆 |
+| **客戶端** | `/customer` | 叫車、付款、查看司機資訊、行程歷史、取消預約 |
+| **司機端** | `/driver` | 上下線、承接/拒絕任務、確認出發、完成行程、Telegram 綁定 |
+| **管理端** | `/admin` | 調度指派、訂單總表、司機狀態、警示牆、費率設定 |
 
-### 2.3 系統架構圖
+### 2.3 系統通訊架構
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -74,13 +75,30 @@
 │   │   Port 80    │      │   Express    │      │             │            │
 │   └─────────────┘      └──────┬──────┘      └─────────────┘            │
 │                                │                                       │
-│                    ┌───────────┼───────────┐                          │
-│                    │           │           │                          │
-│            ┌──────┴─────┐ ┌────┴────┐ ┌────┴────┐                     │
-│            │ LINE SDK   │ │Telegram │ │Gemini   │                     │
-│            │ Webhook    │ │Bot      │ │AI Service│                     │
-│            └────────────┘ └─────────┘ └─────────┘                     │
+│                    ┌───────────┴───────────┐                          │
+│                    │                       │                          │
+│            ┌──────┴──────┐        ┌───────┴──────┐                  │
+│            │ LINE SDK    │        │  Telegram    │                  │
+│            │ Webhook     │        │  Bot         │                  │
+│            └─────────────┘        └──────────────┘                  │
+│                                                                          │
+│   司機與管理員通知                                            OpenRoute │
+│   全部走 Telegram（免費）                                   Service API │
 └─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        Telegram 生態系                                   │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐              │
+│  │    司機 Bot   │    │   管理員 Bot   │    │   通知群組    │              │
+│  │  (通知司機)   │    │  (通知管理員)  │    │  (可選)       │              │
+│  └──────┬───────┘    └──────┬───────┘    └──────────────┘              │
+└─────────┼────────────────────┼──────────────────────────────────────────┘
+          │                    │
+          ▼                    ▼
+    司機操作：              管理員操作：
+    - 確認出發            - 收到司機回覆
+    - 完成行程            - 收到警示
+    - 接收任務            - 每小時報表
 ```
 
 ---
@@ -97,6 +115,7 @@ CREATE TABLE users (
     name TEXT NOT NULL,
     phone TEXT,
     role TEXT CHECK(role IN ('CUSTOMER', 'DRIVER', 'ADMIN')) NOT NULL,
+    telegram_chat_id TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -111,6 +130,7 @@ CREATE TABLE drivers (
     total_rides INTEGER DEFAULT 0,
     status TEXT CHECK(status IN ('AVAILABLE', 'BUSY', 'OFFLINE')) DEFAULT 'OFFLINE',
     is_confirmed INTEGER DEFAULT 0,
+    confirmed_at DATETIME,
     FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
@@ -128,7 +148,8 @@ CREATE TABLE bookings (
     notes TEXT,
     estimated_fare REAL NOT NULL,
     actual_fare REAL,
-    payment_status TEXT CHECK(payment_status IN ('UNPAID', 'PAID', 'REFUNDED')) DEFAULT 'UNPAID',
+    payment_status TEXT CHECK(payment_status IN ('UNPAID', 'DEPOSIT_PAID', 'PAID', 'REFUNDED')) DEFAULT 'UNPAID',
+    deposit_amount REAL DEFAULT 300,
     payment_method TEXT,
     booking_type TEXT CHECK(booking_type IN ('IMMEDIATE', 'SCHEDULED')) DEFAULT 'SCHEDULED',
     category TEXT CHECK(category IN ('GENERAL', 'AIRPORT')) DEFAULT 'AIRPORT',
@@ -136,6 +157,8 @@ CREATE TABLE bookings (
     reply_token TEXT,
     reply_token_expires_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    cancelled_at DATETIME,
+    cancel_reason TEXT,
     FOREIGN KEY (customer_id) REFERENCES users(id),
     FOREIGN KEY (driver_id) REFERENCES drivers(id)
 );
@@ -150,6 +173,19 @@ CREATE TABLE notification_log (
     content TEXT,
     sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (booking_id) REFERENCES bookings(id),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+-- 操作日誌（重要）
+CREATE TABLE operation_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    target_type TEXT NOT NULL,
+    target_id TEXT,
+    details TEXT,
+    ip_address TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
@@ -173,9 +209,12 @@ CREATE TABLE settings (
 
 之後30天內所有回覆都使用儲存的 token，**完全免費**。
 
-### 4.2 Telegram Bot（管理員）
+### 4.2 Telegram Bot（司機 + 管理員）
 
-管理員通知使用 Telegram Bot，**完全免費且無數量限制**。
+- **司機**：接收任務通知、出發提醒、確認回覆
+- **管理員**：接收每小時報表、警示通知、司機回覆狀態
+
+Telegram Bot **完全免費且無數量限制**。
 
 ### 4.3 通知時機
 
@@ -184,8 +223,12 @@ CREATE TABLE settings (
 | 客戶進入 LIFF | 客戶 | Reply API | 免費 |
 | 預約成功 | 客戶 | Reply API（存儲的 token） | 免費 |
 | 司機承接 | 客戶 | Reply API（存儲的 token） | 免費 |
-| 司機出發前30分鐘 | 司機 | LIFF 內查詢（被動） | 免費 |
-| 管理員每小時報表 | 管理員 | Telegram Bot | 免費 |
+| 新任務指派 | 司機 | Telegram Bot | 免費 |
+| **出發前 30 分鐘** | 司機 | Telegram Bot | 免費 |
+| 司機確認出發 | **管理員** | Telegram Bot | 免費 |
+| 司機拒絕任務 | **管理員** | Telegram Bot | 免費 |
+| 每小時報表 | 管理員 | Telegram Bot | 免費 |
+| 每日總表 | 管理員 | Telegram Bot | 免費 |
 
 ---
 
@@ -202,19 +245,18 @@ CREATE TABLE settings (
 
 2. **填寫預約資訊**
    - 上車/下地點（一般/自動帶入機場）
-   - 乘車時間（即時/預約）
+   - 乘車時間（預約，時間可選）
    - 乘客人數、行李件數
    - 備註
 
-3. **AI 試算車資**
-   - 使用 Gemini 估算行車距離
-   - 根據系統設定計算車資
-   - 顯示距離與預估費用
+3. **車資試算**
+   - 使用 OpenRouteService 免費路線 API 取得行駛里程
+   - 根據後台費率設定計算車資
+   - 顯示里程與預估費用
 
-4. **付款**
-   - 信用卡（預留）
-   - LINE Pay（預留）
-   - 街口支付（預留）
+4. **付款方式選擇**
+   - 選項 A：支付訂金 $300，尾款現金收取
+   - 選項 B：全額線上支付（LINE Pay、街口、信用卡 - 預留）
    - **模擬付款按鈕**（當前階段）
 
 5. **預約成功**
@@ -234,30 +276,59 @@ CREATE TABLE settings (
 
 客戶可查看所有歷史預約，顯示狀態、司機資訊、費用。
 
+#### 5.1.4 取消預約
+
+客戶可在出發前取消預約：
+- 點擊「取消預約」按鈕
+- 選擇取消原因
+- 系統記錄取消時間與原因
+- 若已付訂金，標記需退款
+
 ---
 
 ### 5.2 司機端 LIFF（/driver）
 
-#### 5.2.1 任務接收
+#### 5.2.1 上下線管理
 
-當管理員指派訂單後，司機會收到通知（在 LIFF 內）：
-- 顯示訂單詳情
-- 「承接」/「拒絕」按鈕
+司機可在 LIFF 控制自己的狀態：
+- **上線**：開始接收任務通知（Telegram）
+- **下線**：停止接收任務通知
+- 顯示當前狀態（上線/下線，任務中/休息中）
 
-#### 5.2.2 承接/拒絕
+#### 5.2.2 Telegram 綁定
 
-- **承接**：系統回覆客戶，司機卡正式生效
-- **拒絕**：通知管理員重新指派
+首次使用需綁定 Telegram：
+- 顯示綁定 QR Code 或連結
+- 司機加入 Telegram Bot 並驗證
+- 系統關聯 line_user_id 與 telegram_chat_id
 
-#### 5.2.3 出發確認
+#### 5.2.3 任務接收
 
-當預約時間前 30 分鐘，司機需在 LIFF 確認：
-- 「已出發」按鈕
-- 若未確認，系統通知管理員（警示牆）
+當管理員指派訂單後，司機透過 Telegram 收到通知：
+- 顯示訂單詳情（時間、地點、乘客資訊）
+- 「承接」/「拒絕」按鈕（在 Telegram inline keyboard）
 
-#### 5.2.4 完成行程
+#### 5.2.4 承接/拒絕
 
-司機抵達目的地後，點擊「完成行程」。
+- **承接**：
+  - 系統更新狀態
+  - 使用 Reply API 發送司機卡給客戶（免費）
+  - 通知管理員「司機已承接」
+- **拒絕**：
+  - 通知管理員「有新任務需重新指派」
+
+#### 5.2.5 出發確認
+
+當預約時間前 30 分鐘，系統透過 Telegram 提醒司機：
+- 司機點擊「確認出發」
+- 管理員的 Telegram 立即收到「🚕 [司機名] 已確認出發，預約 #[訂單編號]」
+
+若司機未在 15 分鐘內確認：
+- 管理員收到警示「⚠️ [司機名] 尚未確認出發」
+
+#### 5.2.6 完成行程
+
+司機抵達目的地後，在 Telegram 點擊「完成行程」。
 
 ---
 
@@ -277,6 +348,7 @@ CREATE TABLE settings (
 - **警示牆**
   - 司機未及時確認出發
   - 訂單逾時未指派
+  - 司機拒絕任務
 
 #### 5.3.2 指派司機
 
@@ -284,25 +356,33 @@ CREATE TABLE settings (
 - 從上線司機清單中選擇
 - 點擊確認，系統自動：
   - 更新訂單狀態
+  - 透過 Telegram 通知司機新任務
   - 使用 Reply API 發送司機卡給客戶
 
-#### 5.3.3 每小時自動報表
+#### 5.3.3 每小時自動報表（Telegram）
 
-- 每天固定時間生成隔日預約總表
-- 每小時計算未來 2 小時訂單狀態
-- 透過 Telegram Bot 發送給管理員（免費）
+每天固定時間生成並發送：
+- **每小時**：未來 2 小時訂單狀態（已派車/未派車/司機已出發）
+- **每日 20:00**：隔日預約單總表（已指派/未指派）
 
 #### 5.3.4 司機管理
 
-- 新增/編輯司機資料
+- 新增/編輯司機資料（姓名、電話、車牌、車型）
 - 強制上線/離線
 - 查看司機歷史表現
+- 查看司機 Telegram 綁定狀態
 
 #### 5.3.5 費率設定
 
-- 起步價
-- 每公里費率
-- 夜間加成（可選）
+- 起步價（預設 $150）
+- 每公里費率（預設 $25）
+- 夜間加成（22:00-06:00，可選）
+
+#### 5.3.6 操作日誌查詢
+
+管理員可查看所有操作記錄：
+- 誰在什麼時間做了什麼操作
+- 可依日期、操作者篩選
 
 ---
 
@@ -312,19 +392,21 @@ CREATE TABLE settings (
 
 ```
 ┌─────────────────────────────────┐
-│  🎫 立即叫車                    │ → 進入客戶 LIFF
+│  🎫 預約叫車                    │ → 進入客戶 LIFF
 │  📋 查詢訂單                    │ → 進入客戶 LIFF 歷史頁
+│  🚕 司機後台                    │ → 進入司機 LIFF
+│  🔧 管理後台                    │ → 進入管理員 LIFF
 │  📞 聯絡我們                    │ → 開啟 LINE 客服聊天
 └─────────────────────────────────┘
 ```
 
-### 6.2 司機視角（獨立 QR Code）
+### 6.2 司機視角
 
-司機透過獨立 QR Code 加入司机端 LIFF，避免與客戶混淆。
+司機透過 LINE 官方帳號圖文選單「司機後台」按鈕進入司機端 LIFF，與客戶、管理員使用同一個 LINE 帳號，系統自動辨別身份。
 
-### 6.3 管理端視角（獨立連結）
+### 6.3 管理端視角
 
-管理員透過獨立 URL 加入管理端 LIFF。
+管理員透過 LINE 官方帳號圖文選單「管理後台」按鈕進入管理端 LIFF。
 
 ---
 
@@ -334,18 +416,19 @@ CREATE TABLE settings (
 
 | 任務 | 時間 | 動作 |
 |------|------|------|
-| 每小時報表 | `0 * * * *` | 透過 Telegram 發送未來2小時訂單狀態 |
+| 每小時報表 | `0 * * * *` | 透過 Telegram 發送未來2小時訂單狀態給管理員 |
 | 每日總表 | `20:00` | 發送隔日預約單總表（已/未指派） |
-| 出發前 30 分鐘 | 動態計算 | 提醒司機確認（LIFF 內） |
-| 出發前 2 小時 | 動態計算 | 有司機→發司機卡；無司機→發警示 |
+| **出發前 30 分鐘** | 動態計算 | 透過 Telegram 提醒司機確認 |
+| **出發前 2 小時** | 動態計算 | 有司機→發司機卡；無司機→發警示給管理員 |
 
 ### 7.2 警示條件
 
 | 條件 | 動作 |
 |------|------|
-| 司機未在 30 分鐘前確認出發 | 顯示在管理端警示牆 + Telegram 通知 |
+| 司機未在 15 分鐘內確認出發 | Telegram 通知管理員（警示牆） |
 | 訂單逾時未指派（> 30 分鐘） | 顯示在管理端警示牆 |
-| 司機拒絕任務 | 立即通知管理員重新指派 |
+| 司機拒絕任務 | 立即 Telegram 通知管理員 |
+| 無司機可供調派 | 警示顯示在管理端 |
 
 ---
 
@@ -382,33 +465,37 @@ CREATE TABLE settings (
 | GET | `/api/booking/:id` | 取得預約詳情 |
 | GET | `/api/bookings/customer/:lineUserId` | 取得客戶所有預約 |
 | POST | `/api/booking/:id/pay` | 付款（模擬） |
+| POST | `/api/booking/:id/cancel` | 取消預約 |
 
 ### 9.2 司機端
 
 | 方法 | 端點 | 說明 |
 |------|------|------|
 | GET | `/api/driver/:lineUserId/tasks` | 取得司機任務清單 |
-| POST | `/api/driver/task/:bookingId/accept` | 承接任務 |
-| POST | `/api/driver/task/:bookingId/reject` | 拒絕任務 |
-| POST | `/api/driver/task/:bookingId/confirm-start` | 確認出發 |
-| POST | `/api/driver/task/:bookingId/complete` | 完成行程 |
+| POST | `/api/driver/toggle-status` | 切換上下線狀態 |
+| POST | `/api/driver/bind-telegram` | 綁定 Telegram |
+| POST | `/api/driver/task/:bookingId/accept` | 承接任務（Telegram inline callback） |
+| POST | `/api/driver/task/:bookingId/reject` | 拒絕任務（Telegram inline callback） |
+| POST | `/api/driver/task/:bookingId/confirm-start` | 確認出發（Telegram inline callback） |
+| POST | `/api/driver/task/:bookingId/complete` | 完成行程（Telegram inline callback） |
 
 ### 9.3 管理端
 
 | 方法 | 端點 | 說明 |
 |------|------|------|
-| GET | `/api/admin/bookings` | 取得所有預約（可篩選狀態） |
+| GET | `/api/admin/bookings` | 取得所有預約（可篩選狀態/日期） |
 | GET | `/api/admin/drivers` | 取得所有司機 |
 | POST | `/api/admin/booking/:id/assign` | 指派司機 |
 | GET | `/api/admin/dashboard` | 取得儀表板資料 |
 | PUT | `/api/admin/settings` | 更新系統設定 |
+| GET | `/api/admin/operation-logs` | 查詢操作日誌 |
 
 ### 9.4 Webhook
 
 | 方法 | 端點 | 說明 |
 |------|------|------|
 | POST | `/webhook/line` | LINE Messaging API Webhook |
-| POST | `/webhook/telegram` | Telegram Bot Webhook |
+| POST | `/webhook/telegram` | Telegram Bot Webhook（Callback Query） |
 
 ---
 
@@ -417,7 +504,7 @@ CREATE TABLE settings (
 ### 10.1 客戶首次進入流程
 
 ```
-1. 客戶點擊 LINE 圖文選單「立即叫車」
+1. 客戶點擊 LINE 圖文選單「預約叫車」
        ↓
 2. LINE 發送 webhook（postback/richmenu 點擊事件）
        ↓
@@ -439,27 +526,29 @@ CREATE TABLE settings (
        ↓
 2. 系統更新 booking.driver_id + status = 'ASSIGNED'
        ↓
-3. 系統使用客戶的 reply_token 回覆司機卡（免費）
+3. 透過 Telegram 通知司機新任務
        ↓
-4. 司機在 LIFF 看到新任務
+4. 司機在 Telegram 點擊「承接」
        ↓
-5. 司機點擊「承接」
+5. 系統更新 status = 'CONFIRMED'
        ↓
-6. 系統更新 status = 'CONFIRMED'
+6. 使用客戶的 reply_token 回覆「司機已確認」（免費）
        ↓
-7. 系統使用客戶的 reply_token 回覆「司機已確認」（免費）
+7. Telegram 通知管理員「司機已承接」
 ```
 
-### 10.3 出發前提醒流程
+### 10.3 出發確認流程（Telegram）
 
 ```
 1. 排程任務觸發（預約前 30 分鐘）
        ↓
-2. 檢查司機是否已確認出發（is_confirmed）
+2. Telegram 發送提醒給司機：「任務即將開始，請點擊確認出發」
        ↓
-3. 若未確認：
-   - 在管理端警示牆顯示
-   - 透過 Telegram 通知管理員
+3. 司機點擊「確認出發」
+       ↓
+4. 系統更新 booking.is_confirmed = 1, confirmed_at = NOW()
+       ↓
+5. Telegram 立即通知管理員：「🚕 [司機名] 已確認出發，預約 #[訂單編號]」
 ```
 
 ---
@@ -502,9 +591,13 @@ services:
 
 由於金流 API 文件尚未取得，目前實作模擬付款：
 
-- 顯示所有支付方式選項（LINE Pay、街口、信用卡）
+- 顯示兩種支付方式：
+  - **選項 A**：支付訂金 $300，尾款現金收取
+  - **選項 B**：全額線上支付（LINE Pay、街口、信用卡 - 預留）
 - 提供「模擬付款完成」按鈕
-- 按下後直接將 payment_status 改為 'PAID'
+- 按下後：
+  - 選項 A：payment_status 改為 'DEPOSIT_PAID'，deposit_amount = 300
+  - 選項 B：payment_status 改為 'PAID'
 - 顯示付款成功訊息
 
 ---
@@ -518,6 +611,7 @@ services:
 | 信用卡整合 | 待取得 API 文件 | 實際金流串接 |
 | GPS 追蹤 | 後續追加 | 即時司機位置追蹤 |
 | B2B 月結 | 後續追加 | 企業客戶帳務 |
+| 司機排班表 | 後續追加 | 司機排班管理 |
 
 ---
 
@@ -527,5 +621,7 @@ services:
 - ✅ 管理員可在 LINE 內完成指派車輛
 - ✅ 司機可在 LINE 內接收任務並回報
 - ✅ 所有 LINE 通知使用 Reply API，零 Push API 費用
-- ✅ 管理員通知使用 Telegram Bot，零費用
+- ✅ 司機和管理員通知使用 Telegram Bot，零費用
 - ✅ 系統自動化提醒減少人工作業遺漏
+- ✅ 操作日誌完整記錄所有關鍵操作
+- ✅ 司機出發前雙向確認（司機回覆→管理員即時收到）
