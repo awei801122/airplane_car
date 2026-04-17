@@ -1,9 +1,52 @@
 import express from 'express'
 import { getDb } from '../services/database.js'
 import { replyMessage, createTextMessage } from '../services/lineService.js'
+import { getRouteDistance, calculateFare } from '../services/orsService.js'
 import crypto from 'crypto'
 
 const router = express.Router()
+
+// Calculate fare for a route
+router.post('/calculate', async (req, res) => {
+  try {
+    const { pickup_address, dropoff_address } = req.body
+
+    if (!pickup_address || !dropoff_address) {
+      return res.status(400).json({ success: false, error: 'Missing addresses' })
+    }
+
+    const db = getDb()
+
+    // Get fare settings
+    const baseFare = parseInt(db.prepare('SELECT value FROM settings WHERE key = ?').get('baseFare')?.value) || 150
+    const pricePerKm = parseInt(db.prepare('SELECT value FROM settings WHERE key = ?').get('pricePerKm')?.value) || 25
+    const nightSurcharge = parseInt(db.prepare('SELECT value FROM settings WHERE key = ?').get('nightSurcharge')?.value) || 20
+
+    // Get distance from OpenRouteService
+    let distanceKm = 30 // default fallback
+    try {
+      const route = await getRouteDistance(pickup_address, dropoff_address)
+      distanceKm = route.distance
+    } catch (error) {
+      console.error('Failed to get route distance:', error)
+      // Continue with default distance
+    }
+
+    // Calculate fare
+    const estimatedFare = calculateFare(distanceKm, { baseFare, pricePerKm, nightSurcharge })
+
+    res.json({
+      success: true,
+      data: {
+        distance: Math.round(distanceKm * 10) / 10, // round to 1 decimal
+        estimatedFare
+      }
+    })
+  } catch (error) {
+    console.error('Calculate fare error:', error)
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
 
 // Create new booking
 router.post('/', async (req, res) => {
