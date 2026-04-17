@@ -1,9 +1,26 @@
-function App() {
+import React from 'react'
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { AppProvider } from './context/AppContext'
+import Navbar from './components/Navbar'
+import CustomerHome from './pages/customer/CustomerHome'
+import DriverHome from './pages/driver/DriverHome'
+import AdminDashboard from './pages/admin/AdminDashboard'
+
+const App: React.FC = () => {
   return (
-    <div className="min-h-screen bg-background">
-      <h1 className="text-3xl font-bold text-center text-primary">YJOVA 車來了</h1>
-      <p className="text-center text-textSecondary mt-4">機場接送服務</p>
-    </div>
+    <AppProvider>
+      <HashRouter>
+        <div className="min-h-screen bg-background text-textPrimary font-sans">
+          <Navbar />
+          <Routes>
+            <Route path="/customer" element={<CustomerHome />} />
+            <Route path="/driver" element={<DriverHome />} />
+            <Route path="/admin" element={<AdminDashboard />} />
+            <Route path="/" element={<Navigate to="/customer" replace />} />
+          </Routes>
+        </div>
+      </HashRouter>
+    </AppProvider>
   )
 }
 
