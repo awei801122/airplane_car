@@ -128,10 +128,11 @@ router.get('/:id', (req, res) => {
   const db = getDb()
   const booking = db.prepare(`
     SELECT b.*, u.name as customer_name,
-           d.name as driver_name, d.license_plate, d.vehicle_model, d.phone as driver_phone
+           du.name as driver_name, dr.license_plate, dr.vehicle_model, du.phone as driver_phone
     FROM bookings b
     LEFT JOIN users u ON b.customer_id = u.id
-    LEFT JOIN users d ON b.driver_id = d.id
+    LEFT JOIN drivers dr ON b.driver_id = dr.id
+    LEFT JOIN users du ON dr.user_id = du.id
     WHERE b.id = ?
   `).get(req.params.id)
 
@@ -152,9 +153,10 @@ router.get('/customer/:lineUserId', (req, res) => {
   }
 
   const bookings = db.prepare(`
-    SELECT b.*, d.name as driver_name, d.license_plate, d.vehicle_model, d.phone as driver_phone
+    SELECT b.*, du.name as driver_name, dr.license_plate, dr.vehicle_model, du.phone as driver_phone
     FROM bookings b
-    LEFT JOIN users d ON b.driver_id = d.id
+    LEFT JOIN drivers dr ON b.driver_id = dr.id
+    LEFT JOIN users du ON dr.user_id = du.id
     WHERE b.customer_id = ?
     ORDER BY b.created_at DESC
   `).all(customer.id)

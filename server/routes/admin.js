@@ -10,11 +10,11 @@ router.get('/bookings', (req, res) => {
 
   let query = `
     SELECT b.*, u.name as customer_name, u.phone as customer_phone,
-           d.name as driver_name, d.license_plate, d.vehicle_model
+           du.name as driver_name, dr.license_plate, dr.vehicle_model
     FROM bookings b
     LEFT JOIN users u ON b.customer_id = u.id
     LEFT JOIN drivers dr ON b.driver_id = dr.id
-    LEFT JOIN users d ON dr.user_id = d.id
+    LEFT JOIN users du ON dr.user_id = du.id
     WHERE 1=1
   `
   const params = []
