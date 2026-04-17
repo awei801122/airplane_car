@@ -1,0 +1,21 @@
+# Worktrees
+.worktrees/
+worktrees/
+
+# Dependencies
+node_modules/
+
+# Environment
+.env
+.env.local
+
+# Build
+dist/
+
+# Database
+data/*.db
+data/*.db-wal
+data/*.db-shm
+
+# Logs
+*.log
