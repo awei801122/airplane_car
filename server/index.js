@@ -4,6 +4,7 @@ import bookingRoutes from './routes/booking.js'
 import driverRoutes from './routes/driver.js'
 import adminRoutes from './routes/admin.js'
 import webhookRoutes from './routes/webhook.js'
+import authRoutes from './routes/auth.js'
 import { startScheduler } from './services/scheduler.js'
 
 const app = express()
@@ -20,6 +21,7 @@ initDatabase()
 app.use('/api/booking', bookingRoutes)
 app.use('/api/driver', driverRoutes)
 app.use('/api/admin', adminRoutes)
+app.use('/api/auth', authRoutes)
 app.use('/webhook', webhookRoutes)
 
 // Health check

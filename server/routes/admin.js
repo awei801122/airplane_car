@@ -1,5 +1,7 @@
 import express from 'express'
 import { getDb } from '../services/database.js'
+import { notifyDriverNewTask, createInlineKeyboard } from '../services/telegramService.js'
+import { replyMessage, createTextMessage, createDriverCard } from '../services/lineService.js'
 
 const router = express.Router()
 
@@ -65,6 +67,25 @@ router.post('/booking/:id/assign', async (req, res) => {
 
   db.prepare('UPDATE bookings SET driver_id = ?, status = ? WHERE id = ?')
     .run(driver_id, 'ASSIGNED', id)
+
+  // 1) Notify driver via Telegram
+  await notifyDriverNewTask(driver, booking)
+
+  // 2) Send driver card to customer via LINE
+  if (booking.reply_token) {
+    const flexMessage = {
+      type: 'flex',
+      altText: '司機已派任',
+      contents: {
+        type: 'bubble',
+        ...createDriverCard(
+          { name: driver.name, license_plate: driver.license_plate, vehicle_model: driver.vehicle_model, phone: driver.phone },
+          booking
+        )
+      }
+    }
+    await replyMessage(booking.reply_token, [flexMessage])
+  }
 
   // Log operation
   db.prepare('INSERT INTO operation_logs (user_id, action, target_type, target_id, details) VALUES (?, ?, ?, ?, ?)')

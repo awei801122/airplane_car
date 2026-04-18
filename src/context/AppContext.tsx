@@ -1,5 +1,7 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react'
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react'
 import { User, Booking, Driver, SystemSettings } from '../types'
+import { getProfile, isLoggedIn } from '../lib/liff'
+import { API_BASE } from '../config/api'
 
 interface AppContextType {
   currentUser: User | null
@@ -23,6 +25,34 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     pricePerKm: 25,
     nightSurcharge: 20
   })
+
+  useEffect(() => {
+    const initUser = async () => {
+      try {
+        if (isLoggedIn()) {
+          const profile = await getProfile()
+          if (profile) {
+            // Verify/get user from backend
+            const res = await fetch(`${API_BASE}/auth/line-login`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                line_user_id: profile.userId,
+                name: profile.displayName
+              })
+            })
+            const data = await res.json()
+            if (data.success && data.data) {
+              setCurrentUser(data.data as User)
+            }
+          }
+        }
+      } catch (err) {
+        console.error('LIFF init error:', err)
+      }
+    }
+    initUser()
+  }, [])
 
   const addBooking = (booking: Booking) => {
     setBookings(prev => [booking, ...prev])

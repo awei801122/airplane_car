@@ -1,5 +1,7 @@
 import express from 'express'
 import { getDb } from '../services/database.js'
+import { sendToAdmin } from '../services/telegramService.js'
+import { replyMessage, createTextMessage, createDriverCard } from '../services/lineService.js'
 import crypto from 'crypto'
 
 const router = express.Router()
@@ -71,34 +73,70 @@ router.post('/bind-telegram', (req, res) => {
 router.post('/task/:bookingId/accept', async (req, res) => {
   const db = getDb()
   const { bookingId } = req.params
-  const { driver_id } = req.body
+  const { driver_id, line_user_id } = req.body
 
+  // Get driver info
+  const driver = db.prepare('SELECT d.*, u.name, u.phone, u.telegram_chat_id FROM drivers d JOIN users u ON d.user_id = u.id WHERE d.id = ?').get(driver_id)
+
+  // Get booking
   const booking = db.prepare('SELECT * FROM bookings WHERE id = ?').get(bookingId)
   if (!booking) {
     return res.status(404).json({ success: false, error: 'Booking not found' })
   }
 
-  db.prepare('UPDATE bookings SET status = ?, is_confirmed = 0 WHERE id = ?').run('CONFIRMED', bookingId)
+  // Update booking status
+  db.prepare('UPDATE bookings SET status = ?, driver_id = ?, is_confirmed = 0 WHERE id = ?')
+    .run('CONFIRMED', driver_id, bookingId)
+
+  // Update driver status to BUSY
+  db.prepare('UPDATE drivers SET status = ? WHERE id = ?').run('BUSY', driver_id)
+
+  // Notify admin
+  await sendToAdmin(`✅ 司機 ${driver?.name || '司機'} 已承接任務 #${bookingId.slice(-4)}`)
+
+  // Send driver card to customer
+  if (booking.reply_token && driver) {
+    const flexMessage = {
+      type: 'flex',
+      altText: '司機已派任',
+      contents: {
+        type: 'bubble',
+        ...createDriverCard(
+          { name: driver.name, license_plate: driver.license_plate, vehicle_model: driver.vehicle_model, phone: driver.phone },
+          booking
+        )
+      }
+    }
+    await replyMessage(booking.reply_token, [flexMessage])
+  }
 
   res.json({ success: true })
 })
 
 // Reject task
-router.post('/task/:bookingId/reject', (req, res) => {
+router.post('/task/:bookingId/reject', async (req, res) => {
   const db = getDb()
   const { bookingId } = req.params
   const { driver_id, reason } = req.body
 
+  // Get driver name
+  const driver = db.prepare('SELECT u.name FROM drivers d JOIN users u ON d.user_id = u.id WHERE d.id = ?').get(driver_id)
+
+  // Reset booking to PENDING
   db.prepare('UPDATE bookings SET driver_id = NULL, status = ? WHERE id = ?').run('PENDING', bookingId)
 
+  // Log
   db.prepare('INSERT INTO operation_logs (user_id, action, target_type, target_id, details) VALUES (?, ?, ?, ?, ?)')
     .run(driver_id, 'REJECT_TASK', 'booking', bookingId, reason || '司機拒絕任務')
+
+  // Notify admin
+  await sendToAdmin(`⚠️ 司機 ${driver?.name || '未知'} 拒絕任務 #${bookingId.slice(-4)}，請重新指派`)
 
   res.json({ success: true })
 })
 
 // Confirm start (departure)
-router.post('/task/:bookingId/confirm-start', (req, res) => {
+router.post('/task/:bookingId/confirm-start', async (req, res) => {
   const db = getDb()
   const { bookingId } = req.params
   const { driver_id } = req.body
@@ -107,6 +145,12 @@ router.post('/task/:bookingId/confirm-start', (req, res) => {
   db.prepare('UPDATE bookings SET status = ?, is_confirmed = 1, confirmed_at = ? WHERE id = ?')
     .run('STARTING', now, bookingId)
 
+  // Get driver name
+  const driver = db.prepare('SELECT u.name FROM drivers d JOIN users u ON d.user_id = u.id WHERE d.id = ?').get(driver_id)
+
+  // Notify admin
+  await sendToAdmin(`🚕 ${driver?.name || '司機'} 已確認出發，預約 #${bookingId.slice(-4)}`)
+
   db.prepare('INSERT INTO operation_logs (user_id, action, target_type, target_id, details) VALUES (?, ?, ?, ?, ?)')
     .run(driver_id, 'CONFIRM_START', 'booking', bookingId, now)
 
@@ -114,7 +158,7 @@ router.post('/task/:bookingId/confirm-start', (req, res) => {
 })
 
 // Complete task
-router.post('/task/:bookingId/complete', (req, res) => {
+router.post('/task/:bookingId/complete', async (req, res) => {
   const db = getDb()
   const { bookingId } = req.params
   const { driver_id, actual_fare } = req.body
@@ -122,7 +166,14 @@ router.post('/task/:bookingId/complete', (req, res) => {
   db.prepare('UPDATE bookings SET status = ?, actual_fare = ? WHERE id = ?')
     .run('COMPLETED', actual_fare || null, bookingId)
 
-  db.prepare('UPDATE drivers SET total_rides = total_rides + 1 WHERE id = ?').run(driver_id)
+  // Reset driver status to AVAILABLE
+  db.prepare('UPDATE drivers SET status = ?, total_rides = total_rides + 1 WHERE id = ?').run('AVAILABLE', driver_id)
+
+  // Get driver name
+  const driver = db.prepare('SELECT u.name FROM drivers d JOIN users u ON d.user_id = u.id WHERE d.id = ?').get(driver_id)
+
+  // Notify admin
+  await sendToAdmin(`✅ 司機 ${driver?.name || '司機'} 已完成行程 #${bookingId.slice(-4)}`)
 
   db.prepare('INSERT INTO operation_logs (user_id, action, target_type, target_id, details) VALUES (?, ?, ?, ?, ?)')
     .run(driver_id, 'COMPLETE', 'booking', bookingId, actual_fare ? `實際車資: ${actual_fare}` : '')

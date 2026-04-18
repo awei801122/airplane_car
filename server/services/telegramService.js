@@ -119,6 +119,17 @@ export async function sendHourlyReport(stats) {
   return sendToAdmin(message)
 }
 
+export async function answerCallbackQuery(callbackQueryId, text = '') {
+  const payload = { callback_query_id: callbackQueryId }
+  if (text) payload.text = text
+
+  await fetch(`${TELEGRAM_API}/answerCallbackQuery`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  })
+}
+
 export async function sendDailyReport(tomorrowBookings) {
   const message = `
 📋 <b>明日預約總表</b>
@@ -141,6 +152,7 @@ export default {
   sendMessage,
   sendToAdmin,
   sendToDriver,
+  answerCallbackQuery,
   notifyDriverNewTask,
   remindDriverDeparture,
   notifyAdminDriverConfirmed,

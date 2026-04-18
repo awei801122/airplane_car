@@ -4,6 +4,7 @@ import { useApp } from '../../context/AppContext'
 import { Booking, BookingStatus } from '../../types'
 import BookingForm from '../../components/booking/BookingForm'
 import { API_BASE } from '../../config/api'
+import { openExternalBrowser } from '../../lib/liff'
 
 const CustomerHome: React.FC = () => {
   const navigate = useNavigate()
@@ -211,14 +212,14 @@ const CustomerHome: React.FC = () => {
             <span className="text-sm font-medium text-textPrimary">行程紀錄</span>
           </button>
           <button
-            onClick={() => {/* TODO: Contact feature */}}
+            onClick={() => openExternalBrowser('https://line.me/ti/p/@yjova')}
             className="bg-surface rounded-xl p-4 shadow-sm border border-border flex flex-col items-center gap-2 hover:border-primary transition-colors"
           >
             <i className="fa-solid fa-headset text-2xl text-primary"></i>
             <span className="text-sm font-medium text-textPrimary">聯絡客服</span>
           </button>
           <button
-            onClick={() => {/* TODO: Help feature */}}
+            onClick={() => alert('【YJOVA 車來了 - 使用說明】\n\n📌 預約流程：\n1. 點擊「機場接送 立即預約」\n2. 選擇機場和上下車地點\n3. 選擇乘車時間和人數\n4. 系統會自動計算車資\n5. 選擇付款方式（訂金或全額）\n6. 確認預約後等待派車通知\n\n📌 司機來了怎麼辦？\n當司機被指派後，您會收到 LINE 通知，顯示司機資訊（姓名、車牌、用車時間）\n\n📌 如何取消？\n在「行程紀錄」中選擇訂單，點擊取消按鈕，並選擇取消原因\n\n📌 費用說明：\n- 起步價 NT$150\n- 每公里 NT$25\n- 夜間加成時段（22:00-06:00）另計')}
             className="bg-surface rounded-xl p-4 shadow-sm border border-border flex flex-col items-center gap-2 hover:border-primary transition-colors"
           >
             <i className="fa-solid fa-circle-question text-2xl text-primary"></i>
